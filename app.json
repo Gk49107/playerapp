@@ -1,0 +1,6 @@
+{
+  "name": "VideoPlayerApp",
+  "displayName": "Advanced Video Player",
+  "version": "1.0.0",
+  "description": "Advanced video player with EAC3, AC3, AAC, MP3, FLAC, and Opus audio codec support"
+}

@@ -1,0 +1,48 @@
+# React Native
+node_modules/
+.expo/
+dist/
+npm-debug.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+web-build/
+
+# IDEs
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Build files
+build/
+.gradle/
+.m2/
+*.apk
+*.aab
+*.hprof
+android/app/build/
+android/.gradle/
+android/local.properties
+android/app/debug.keystore
+
+# Metro
+.metro-health-check*
+
+# Yarn
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.*
+

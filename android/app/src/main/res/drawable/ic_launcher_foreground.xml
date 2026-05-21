@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="192dp"
+    android:height="192dp"
+    android:viewportWidth="192"
+    android:viewportHeight="192">
+    <!-- Background circle -->
+    <path
+        android:fillColor="#FF6B35"
+        android:pathData="M96,0 C149.02,0 192,42.98 192,96 C192,149.02 149.02,192 96,192 C42.98,192 0,149.02 0,96 C0,42.98 42.98,0 96,0 Z" />
+    <!-- Play button triangle -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M72,56 L72,136 L136,96 Z" />
+    <!-- Outer ring -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:fillColor="@android:color/transparent"
+        android:pathData="M24,96 A72,72 0 0,1 168,96" />
+</vector>
