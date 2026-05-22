@@ -15,15 +15,27 @@ import {
   ToastAndroid,
   Modal,
   ScrollView,
+  Alert,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import RNFS from 'react-native-fs';
 import { formatTime } from '../utils/videoUtils';
 import { createThumbnail } from 'react-native-create-thumbnail';
 import VideoPlayer from '../components/VideoPlayer';
+import BrowserScreen from './BrowserScreen';
 import { VideoItem } from '../types/video';
 
 const VIDEO_EXTENSIONS = /\.(mp4|mkv|avi|mov|flv|webm|3gp|wmv|m4v|ts|m2ts)$/i;
+
+type SortBy = 'name' | 'date' | 'size' | 'duration';
+type SortDir = 'asc' | 'desc';
+
+const SORT_OPTIONS: { field: SortBy; label: string }[] = [
+  { field: 'name',     label: 'Name' },
+  { field: 'date',     label: 'Date' },
+  { field: 'size',     label: 'Size' },
+  { field: 'duration', label: 'Duration' },
+];
 
 interface FolderItem {
   id: string;
@@ -74,6 +86,10 @@ const HomeScreen: React.FC = () => {
   const [resumeMap, setResumeMap] = useState<Record<string, { pos: number; dur: number; ts: number }>>({}); 
   const [crashLog, setCrashLog] = useState<string | null>(null);
   const [showCrashModal, setShowCrashModal] = useState(false);
+  const [sortBy, setSortBy] = useState<SortBy>('name');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const [showRecent, setShowRecent] = useState(false);
+  const [showBrowser, setShowBrowser] = useState(false);
 
   // ── Check for crash log from previous session ──────────────────────
   useEffect(() => {
@@ -151,6 +167,56 @@ const HomeScreen: React.FC = () => {
     return () => sub.remove();
   }, [currentFolder]);
 
+  const handleSort = useCallback((field: SortBy) => {
+    if (sortBy === field) {
+      setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortBy(field);
+      setSortDir('asc');
+    }
+  }, [sortBy]);
+
+  const sortVideos = useCallback((list: VideoItem[]): VideoItem[] => {
+    return [...list].sort((a, b) => {
+      let cmp = 0;
+      switch (sortBy) {
+        case 'name':     cmp = a.title.localeCompare(b.title); break;
+        case 'date':     cmp = (a.mtime ?? 0) - (b.mtime ?? 0); break;
+        case 'size':     cmp = (a.size ?? 0) - (b.size ?? 0); break;
+        case 'duration': cmp = (a.duration ?? 0) - (b.duration ?? 0); break;
+      }
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+  }, [sortBy, sortDir]);
+
+  const sortFolders = useCallback((list: FolderItem[]): FolderItem[] => {
+    return [...list].sort((a, b) => {
+      let cmp = 0;
+      switch (sortBy) {
+        case 'name': cmp = a.name.localeCompare(b.name); break;
+        case 'date': {
+          const aMax = a.videos.reduce((m, v) => Math.max(m, v.mtime ?? 0), 0);
+          const bMax = b.videos.reduce((m, v) => Math.max(m, v.mtime ?? 0), 0);
+          cmp = aMax - bMax;
+          break;
+        }
+        case 'size': {
+          const aTotal = a.videos.reduce((s, v) => s + (v.size ?? 0), 0);
+          const bTotal = b.videos.reduce((s, v) => s + (v.size ?? 0), 0);
+          cmp = aTotal - bTotal;
+          break;
+        }
+        case 'duration': {
+          const aDur = a.videos.reduce((s, v) => s + (v.duration ?? 0), 0);
+          const bDur = b.videos.reduce((s, v) => s + (v.duration ?? 0), 0);
+          cmp = aDur - bDur;
+          break;
+        }
+      }
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+  }, [sortBy, sortDir]);
+
   // ── Group videos by parent folder ──────────────────────────────────────
   const folders = useMemo<FolderItem[]>(() => {
     const map = new Map<string, VideoItem[]>();
@@ -167,31 +233,47 @@ const HomeScreen: React.FC = () => {
         name: path.split('/').pop() || path,
         path,
         videos,
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      }));
   }, [videoFiles]);
 
   // ── Videos for current folder (with optional search filter) ───────────
   const folderVideos = useMemo<VideoItem[]>(() => {
     const src = currentFolder ? currentFolder.videos : [];
-    if (!searchQuery.trim()) return src;
-    const q = searchQuery.toLowerCase();
-    return src.filter(v => v.title.toLowerCase().includes(q));
-  }, [currentFolder, searchQuery]);
+    const filtered = searchQuery.trim()
+      ? src.filter(v => v.title.toLowerCase().includes(searchQuery.toLowerCase()))
+      : src;
+    return sortVideos(filtered);
+  }, [currentFolder, searchQuery, sortVideos]);
 
   // ── All videos (flat) with optional search filter ─────────────────────
   const allVideosFiltered = useMemo<VideoItem[]>(() => {
-    if (!searchQuery.trim()) return videoFiles;
-    const q = searchQuery.toLowerCase();
-    return videoFiles.filter(v => v.title.toLowerCase().includes(q));
-  }, [videoFiles, searchQuery]);
+    const filtered = searchQuery.trim()
+      ? videoFiles.filter(v => v.title.toLowerCase().includes(searchQuery.toLowerCase()))
+      : videoFiles;
+    return sortVideos(filtered);
+  }, [videoFiles, searchQuery, sortVideos]);
 
   // ── Folders with optional search filter ──────────────────────────────
   const foldersFiltered = useMemo<FolderItem[]>(() => {
-    if (!searchQuery.trim()) return folders;
     const q = searchQuery.toLowerCase();
-    return folders.filter(f => f.name.toLowerCase().includes(q) || f.videos.some(v => v.title.toLowerCase().includes(q)));
-  }, [folders, searchQuery]);
+    const filtered = searchQuery.trim()
+      ? folders.filter(f => f.name.toLowerCase().includes(q) || f.videos.some(v => v.title.toLowerCase().includes(q)))
+      : folders;
+    return sortFolders(filtered);
+  }, [folders, searchQuery, sortFolders]);
+
+  // ── Recently played (from resumeMap, sorted newest first) ─────────────────
+  const recentVideos = useMemo(() => {
+    return Object.entries(resumeMap)
+      .sort(([, a], [, b]) => b.ts - a.ts)
+      .slice(0, 30)
+      .map(([uri, data]) => {
+        const existing = videoFiles.find(v => v.uri === uri);
+        const title = existing?.title ?? (uri.split('/').pop() ?? 'Video');
+        const video: VideoItem = existing ?? { id: `recent_${uri}`, title, uri, duration: data.dur };
+        return { video, pos: data.pos, dur: data.dur, ts: data.ts };
+      });
+  }, [resumeMap, videoFiles]);
 
   useEffect(() => {
     requestPermissionAndScan();
@@ -233,6 +315,8 @@ const HomeScreen: React.FC = () => {
             uri: `file://${item.path}`,
             duration: 0,
             subtitles: [],
+            size: item.size ? Number(item.size) : undefined,
+            mtime: item.mtime ? item.mtime.getTime() : undefined,
           });
         } else if (item.isDirectory() && depth > 0) {
           await scanDir(item.path, depth - 1, found);
@@ -267,6 +351,18 @@ const HomeScreen: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── Delete video file ─────────────────────────────────────────────────
+  const deleteVideo = useCallback(async (video: VideoItem) => {
+    try {
+      await RNFS.unlink(video.uri.replace('file://', ''));
+      await AsyncStorage.removeItem(`vp_resume:${video.uri}`);
+      setVideoFiles(prev => prev.filter(v => v.uri !== video.uri));
+      ToastAndroid.show('Video deleted', ToastAndroid.SHORT);
+    } catch {
+      ToastAndroid.show('Could not delete — permission denied', ToastAndroid.LONG);
+    }
+  }, []);
+
   // ── Folder row ─────────────────────────────────────────────────────────
   const renderFolderItem = ({ item }: { item: FolderItem }) => (
     <TouchableOpacity
@@ -296,8 +392,19 @@ const HomeScreen: React.FC = () => {
     const resumeLabel = saved
       ? `Resume ${formatTime(Math.round(saved.pos))}`
       : null;
+    const onLongPress = () => {
+      Alert.alert(
+        item.title.replace(/\.[^.]+$/, ''),
+        undefined,
+        [
+          { text: 'Play', onPress: () => setSelectedVideo(item) },
+          { text: 'Delete', style: 'destructive', onPress: () => deleteVideo(item) },
+          { text: 'Cancel', style: 'cancel' },
+        ],
+      );
+    };
     return (
-      <TouchableOpacity style={styles.videoRow} onPress={() => setSelectedVideo(item)}>
+      <TouchableOpacity style={styles.videoRow} onPress={() => setSelectedVideo(item)} onLongPress={onLongPress}>
         <View style={styles.thumbWrap}>
           <Thumb uri={item.uri} style={styles.thumbImg} />
           {pct > 0 && (
@@ -318,10 +425,44 @@ const HomeScreen: React.FC = () => {
       </TouchableOpacity>
     );
   };
-
+  // ── Recent played row ──────────────────────────────────────────────────────
+  const renderRecentItem = ({ item }: { item: { video: VideoItem; pos: number; dur: number; ts: number } }) => {
+    const pct = item.dur > 0 ? item.pos / item.dur : 0;
+    const dateStr = new Date(item.ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    return (
+      <TouchableOpacity
+        style={styles.recentItem}
+        onPress={() => { setShowRecent(false); setSelectedVideo(item.video); }}
+      >
+        <View style={styles.recentThumbWrap}>
+          <Thumb uri={item.video.uri} style={styles.recentThumb} />
+          {pct > 0 && (
+            <View style={styles.resumeBar}>
+              <View style={[styles.resumeBarFill, { width: `${Math.round(pct * 100)}%` as any }]} />
+            </View>
+          )}
+        </View>
+        <View style={styles.recentInfo}>
+          <Text style={styles.recentItemTitle} numberOfLines={2}>
+            {item.video.title.replace(/\.[^.]+$/, '')}
+          </Text>
+          <Text style={styles.recentItemResume}>
+            {`▶ Resume ${formatTime(Math.round(item.pos))}${item.dur > 0 ? ` / ${formatTime(Math.round(item.dur))}` : ''}`}
+          </Text>
+          <Text style={styles.recentItemDate}>{dateStr}</Text>
+        </View>
+        <Text style={styles.playArrow}>▶</Text>
+      </TouchableOpacity>
+    );
+  };
   // ── Video player full-screen ───────────────────────────────────────────
   if (selectedVideo) {
     return <VideoPlayer video={selectedVideo} onBack={() => setSelectedVideo(null)} />;
+  }
+
+  // ── Browser full-screen ────────────────────────────────────────────────
+  if (showBrowser) {
+    return <BrowserScreen onClose={() => setShowBrowser(false)} />;
   }
 
   const inFolder = currentFolder !== null;
@@ -381,6 +522,9 @@ const HomeScreen: React.FC = () => {
             <Text style={styles.debugBtnText}>🐛</Text>
           </TouchableOpacity>
         )}
+        <TouchableOpacity onPress={() => setShowBrowser(true)} style={styles.browserBtn}>
+          <Text style={styles.browserBtnText}>🌐</Text>
+        </TouchableOpacity>
         <TouchableOpacity onPress={scanVideos} style={styles.refreshBtn}>
           <Text style={styles.refreshBtnText}>{inFolder ? '⟳' : '⟳ Refresh'}</Text>
         </TouchableOpacity>
@@ -424,6 +568,26 @@ const HomeScreen: React.FC = () => {
             <Text style={styles.clearBtnText}>✕</Text>
           </TouchableOpacity>
         )}
+      </View>
+
+      {/* ── Sort bar ── */}
+      <View style={styles.sortBar}>
+        {SORT_OPTIONS.map(({ field, label }) => {
+          const active = sortBy === field;
+          let sortArrow = '';
+          if (active) { sortArrow = sortDir === 'asc' ? ' ↑' : ' ↓'; }
+          return (
+            <TouchableOpacity
+              key={field}
+              style={[styles.sortBtn, active && styles.sortBtnActive]}
+              onPress={() => handleSort(field)}
+            >
+              <Text style={[styles.sortBtnText, active && styles.sortBtnTextActive]}>
+                {label}{sortArrow}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       {/* ── Loading ── */}
@@ -472,6 +636,48 @@ const HomeScreen: React.FC = () => {
             </View>
           }
         />
+      )}
+
+      {/* ── Recently Played sheet ── */}
+      <Modal
+        visible={showRecent}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowRecent(false)}
+      >
+        <View style={styles.recentOverlay}>
+          <TouchableOpacity
+            style={styles.recentBackdrop}
+            onPress={() => setShowRecent(false)}
+            activeOpacity={1}
+          />
+          <View style={styles.recentSheet}>
+            <View style={styles.recentHeader}>
+              <Text style={styles.recentTitle}>⏱ Recently Played</Text>
+              <TouchableOpacity onPress={() => setShowRecent(false)} style={styles.recentClose}>
+                <Text style={styles.recentCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <FlatList
+              data={recentVideos}
+              keyExtractor={item => item.video.uri}
+              renderItem={renderRecentItem}
+              ListEmptyComponent={
+                <Text style={styles.recentEmpty}>No recently played videos yet</Text>
+              }
+            />
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── FAB ── */}
+      {recentVideos.length > 0 && (
+        <TouchableOpacity style={styles.fab} onPress={() => setShowRecent(true)}>
+          <Text style={styles.fabIcon}>⏱</Text>
+          <View style={styles.fabBadge}>
+            <Text style={styles.fabBadgeText}>{recentVideos.length > 99 ? '99+' : recentVideos.length}</Text>
+          </View>
+        </TouchableOpacity>
       )}
 
     </View>
@@ -524,6 +730,17 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: 'bold',
     fontSize: 13,
+  },
+  browserBtn: {
+    marginLeft: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: '#1e40af',
+    borderRadius: 6,
+  },
+  browserBtnText: {
+    color: '#fff',
+    fontSize: 16,
   },
   debugBtn: {
     marginLeft: 8,
@@ -752,6 +969,34 @@ const styles = StyleSheet.create({
     marginLeft: 6,
   },
 
+  // ── Sort bar ─────────────────────────────────────────────────────────────
+  sortBar: {
+    flexDirection: 'row',
+    backgroundColor: '#161616',
+    borderBottomWidth: 1,
+    borderBottomColor: '#2a2a2a',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  sortBtn: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 7,
+    borderRadius: 6,
+    marginHorizontal: 2,
+  },
+  sortBtnActive: {
+    backgroundColor: '#2a1800',
+  },
+  sortBtnText: {
+    color: '#555',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  sortBtnTextActive: {
+    color: '#FF6B35',
+  },
+
   // ── States ───────────────────────────────────────────────────────────────
   centered: {
     flex: 1,
@@ -801,6 +1046,129 @@ const styles = StyleSheet.create({
   },
   tabBtnTextActive: {
     color: '#FF6B35',
+  },
+
+  // ── FAB ───────────────────────────────────────────────────────────────────────
+  fab: {
+    position: 'absolute',
+    bottom: 24,
+    right: 20,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: '#FF6B35',
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+  },
+  fabIcon: {
+    fontSize: 24,
+  },
+  fabBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  fabBadgeText: {
+    color: '#FF6B35',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+
+  // ── Recent played sheet ──────────────────────────────────────────────────
+  recentOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  recentBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+  },
+  recentSheet: {
+    backgroundColor: '#1a1a1a',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    maxHeight: '75%',
+    paddingBottom: 24,
+  },
+  recentHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2d2d2d',
+  },
+  recentTitle: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  recentClose: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#333',
+    borderRadius: 14,
+  },
+  recentCloseText: {
+    color: '#aaa',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  recentEmpty: {
+    color: '#666',
+    textAlign: 'center',
+    padding: 24,
+    fontSize: 14,
+  },
+  recentItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
+    paddingHorizontal: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#222',
+  },
+  recentThumbWrap: {
+    marginRight: 12,
+  },
+  recentThumb: {
+    width: 80,
+    height: 52,
+    borderRadius: 6,
+    backgroundColor: '#2a2a2a',
+  },
+  recentInfo: {
+    flex: 1,
+  },
+  recentItemTitle: {
+    color: '#eee',
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 3,
+  },
+  recentItemResume: {
+    color: '#FF6B35',
+    fontSize: 11,
+    marginBottom: 2,
+  },
+  recentItemDate: {
+    color: '#555',
+    fontSize: 10,
   },
 });
 

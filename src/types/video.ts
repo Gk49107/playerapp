@@ -5,6 +5,8 @@ export interface VideoItem {
   duration: number;
   thumbnail?: string;
   subtitles?: SubtitleTrack[];
+  size?: number;    // file size in bytes
+  mtime?: number;   // modification time as Unix ms timestamp
 }
 
 export interface SubtitleTrack {
